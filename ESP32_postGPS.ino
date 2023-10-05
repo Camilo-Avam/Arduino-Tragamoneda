@@ -16,8 +16,8 @@ Adafruit_GPS serialgps(&GPSSerial);
 
 String guardarGPS;
 
-const char* ssid = "ZONA WIFI";
-const char* password = "Zwifi2023.";
+const char* ssid = "Z";
+const char* password = "Z";
 WebServer server(80);
 String backendURL = "http://192.168.10.190:8000/";
 String token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJjcmVhdGVkIjoiVFZSWk5VNVVUVFZPZW1jMVRXYzlQUT09IiwiZXhwaXJlIjoiVFZSbk1VMTZRVE5PZW1jMVRXYzlQUT09IiwidXNlcklkIjoiVFdjOVBRPT0ifQ.TPaUn1g5FpspFjf0x1nQ3ff4iNFDEBnx-RmcFEfFBAY";

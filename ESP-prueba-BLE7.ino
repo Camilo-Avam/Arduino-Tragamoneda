@@ -12,6 +12,7 @@
 
 BLEService serviceBLE("0880dd71-4dbd-474a-9101-7734ca3dd46e");  // Bluetooth® Low Energy LED Service
 BLEStringCharacteristic characteristicBLE("9d0983d4-0c6c-45c4-b83b-14abaa6ba18a", BLERead | BLEWrite, 1024);
+BLEStringCharacteristic characteristicGPS("9d0983d4-0c65-45c4-b83b-14abaa6ba18c", BLERead | BLEWrite, 128);
 BLEStringCharacteristic characteristicWIFIPass("9d0983d4-0c6f-45c4-b83b-14abaa6ba18d", BLERead | BLEWrite, 128);
 BLEStringCharacteristic characteristicWIFISsid("9d0983d4-0c61-45c4-b83b-14abaa6ba18e", BLERead | BLEWrite, 128);
 
@@ -20,13 +21,13 @@ String guardarGPS;
 
 String ssid;
 String password;
-WebServer server(8080);
+WebServer server(8082);
 String backendURL = "http://192.168.10.220:8000/";
 String token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJjcmVhdGVkIjoiVFZSWk5VNVVUVFZPZW1jMVRXYzlQUT09IiwiZXhwaXJlIjoiVFZSbk1VMTZRVE5PZW1jMVRXYzlQUT09IiwidXNlcklkIjoiVFdjOVBRPT0ifQ.TPaUn1g5FpspFjf0x1nQ3ff4iNFDEBnx-RmcFEfFBAY";
 
 //---------------------------------------------------------------------------------------------------------
 // Variables para enviar informacion del serial de la maquina
-const String SERIAL_ID = "3204555291";  // Serial de la maquina´
+const String SERIAL_ID = "3112848849";  // Serial de la maquina´
 IPAddress MACHINE_IP;
 
 //---------------------------------------------------------------------------------------------------------
@@ -70,7 +71,11 @@ bool synchronization = false;
 
 String actualizaFechaHora() {
   DateTime now = rtc.now();
-  return String(String(now.month(), DEC) + "/" + String(now.day(), DEC) + "/" + String(now.year(), DEC) + " " + String(now.hour(), DEC) + ":" + String(now.minute(), DEC) + ":" + String(now.second(), DEC));
+  char formattedTime[9];  // Suficiente para "hh:mm:ss" y el carácter nulo
+
+  // Formatea la hora, minuto y segundo con dos dígitos y coloca en formattedTime
+  sprintf(formattedTime, "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
+  return String(String(now.month(), DEC) + "/" + String(now.day(), DEC) + "/" + String(now.year(), DEC) + " " + String(formattedTime));
 }
 //---------------------------------------------------------------------------------------------------------
 bool getNTPTime() {
@@ -175,7 +180,8 @@ void detectaSerial() {  // detectaSerial() Detecta si hay cambios en el serial e
 //---------------------------------------------------------------------------------------------------------
 void saveSD(String nombreArchivo, String informacion) {
   File archivo;
-  if (nombreArchivo == "/WIFIpass.txt" || nombreArchivo == "/WIFIssid.txt") {
+
+  if (nombreArchivo == "/WIFIpass.txt" || nombreArchivo == "/WIFIssid.txt" || nombreArchivo == "/location.txt") {
     archivo = SD.open(nombreArchivo, FILE_WRITE);
   } else {
     archivo = SD.open(nombreArchivo, FILE_APPEND);
@@ -188,8 +194,9 @@ void saveSD(String nombreArchivo, String informacion) {
       Serial.println("Error al abrir el archivo.");
     }
   }
+
   if (archivo) {
-    if (nombreArchivo == "/WIFIpass.txt" || nombreArchivo == "/WIFIssid.txt") {
+    if (nombreArchivo == "/WIFIpass.txt" || nombreArchivo == "/WIFIssid.txt" || nombreArchivo == "/location.txt") {
       archivo.print(informacion);
     } else {
       archivo.println(informacion);
@@ -481,6 +488,11 @@ void iniciarServicioBlue() {
         characteristicWIFIPass.writeValue("Clave red cambiado: " + value);
         iniciarWifiSD();
       }
+      if (characteristicGPS.written()) {
+        String value = characteristicGPS.value();
+        saveSD("/location.txt", value);
+        characteristicGPS.writeValue("Ubicacion guardada: " + value);
+      }
     }
     Serial.print(F("Disconnected from central: "));
     Serial.println(central.address());
@@ -491,11 +503,13 @@ void iniciarServicioBlue() {
 //=========================================================================================================
 void mainSecond(void* parameter) {
   while (true) {
-    while (!wifiConnected) {
+    vTaskDelay(pdMS_TO_TICKS(1));
+    // Serial.println("punto 1");
+    if (!wifiConnected) {
       detectaSerial();
       leerBuzzer();
     }
-    while (wifiConnected) {
+    if (wifiConnected) {
       detectaSerial();
       leerBuzzer();
       server.handleClient();
@@ -503,9 +517,9 @@ void mainSecond(void* parameter) {
           wifiConnected=false;
           synchronization=false;
           Serial.println("No hay conexion con red");
+          vTaskDelay(pdMS_TO_TICKS(1));
         }
     }
-    
   }
 }
 //---------------------------------------------------------------------------------------------------------
@@ -513,13 +527,13 @@ void syncData() {
   HTTPClient httpSync;
   String url = backendURL + "synchronization";
 
-  File fileOUT = SD.open("/cashOutSync.txt", FILE_READ);
-  File fileIN = SD.open("/cashInSync.txt", FILE_READ);
+  File fileOUT = SD.open("/cashOutSyn.txt", FILE_READ);
+  File fileIN = SD.open("/cashInSyn.txt", FILE_READ);
   int sizeIN = fileIN.size();
   int sizeOUT = fileOUT.size();
 
-  int sizeFile=sizeIN+sizeOUT+50;
- 
+  int sizeFile = sizeIN + sizeOUT + 100;
+  Serial.println(sizeFile);
   String jsonString;
   DynamicJsonDocument jsonDoc(sizeFile);
   JsonObject json = jsonDoc.to<JsonObject>();
@@ -557,18 +571,19 @@ void syncData() {
       Serial.print("Respuesta del servidor: ");
       Serial.println(httpSync.getString());
       synchronization = true;
+
     }
   } else {
     Serial.print("Error en la solicitud HTTP, se obtuvo http.error:     :");
     Serial.println(httpSync.errorToString(httpCode));
   }
   httpSync.end();
-  Serial.println("Se esta cerrando la informacion");
 }
 
 //---------------------------------------------------------------------------------------------------------
 void enviarPingHTTP(void* parameter) {
   while (true) {
+    vTaskDelay(pdMS_TO_TICKS(30000));
     if (conecto && !synchronization) {
       syncData();
     }
@@ -617,11 +632,9 @@ void enviarPingHTTP(void* parameter) {
         Serial.println(httpPING.errorToString(httpCode));
         digitalWrite(ledConexion, LOW);
         digitalWrite(ledConectando, HIGH);
-        
       }
       httpPING.end();
     }
-    vTaskDelay(pdMS_TO_TICKS(30000));
   }
 }
 //=========================================================================================================
@@ -643,18 +656,14 @@ void setup() {
   digitalWrite(ledConectando, HIGH);
   digitalWrite(ledConexion, LOW);
 
-
+  delay(200);
   if (!SD.begin(5)) {
     Serial.println("Error al inicializar la tarjeta microSD.");
     return;
   }
-  delay(200);
   Serial.println("Tarjeta microSD inicializada correctamente.");
-  delay(200);
 
   iniciarWifiSD();
-
-  delay(200);
   // Bluetooth
   if (!BLE.begin()) {
     Serial.println("starting Bluetooth® Low Energy module failed!");
@@ -662,9 +671,8 @@ void setup() {
       ;
   }
 
-  char bufferBLE[20];  // Un buffer para almacenar la cadena formateada
-
-  strcpy(bufferBLE, "ESP32: ");  // Copia la cadena original al resultado
+  char bufferBLE[20];
+  strcpy(bufferBLE, "ESP32: ");
   strcat(bufferBLE, SERIAL_ID.c_str());
 
   BLE.setLocalName(bufferBLE);
@@ -672,11 +680,13 @@ void setup() {
 
   // add the characteristic to the service
   serviceBLE.addCharacteristic(characteristicBLE);
+  serviceBLE.addCharacteristic(characteristicGPS);
   serviceBLE.addCharacteristic(characteristicWIFISsid);
   serviceBLE.addCharacteristic(characteristicWIFIPass);
   BLE.addService(serviceBLE);
 
   characteristicBLE.writeValue(" ");
+  characteristicGPS.writeValue(" ");
   characteristicWIFISsid.writeValue(" ");
   characteristicWIFIPass.writeValue(" ");
   delay(200);
@@ -691,13 +701,11 @@ void setup() {
   }
   // Configura el servidor NTP
   if (getNTPTime()) {
-    // Si se obtuvo la hora de Internet, ajusta el RTC
     rtc.adjust(DateTime(initialTime.tm_year + 1900, initialTime.tm_mon + 1, initialTime.tm_mday,
                         initialTime.tm_hour, initialTime.tm_min, initialTime.tm_sec));
     Serial.print("Fecha y hora ajustadas desde Internet: ");
     Serial.println(actualizaFechaHora());
   } else {
-    // Si no se pudo obtener la hora de Internet, usa la hora actual del RTC
     Serial.print("No se pudo obtener la hora de Internet. Usando la hora del RTC: ");
     Serial.println(actualizaFechaHora());
   }
@@ -707,6 +715,6 @@ void setup() {
 }
 //---------------------------------------------------------------------------------------------------------
 void loop() {
+  vTaskDelay(pdMS_TO_TICKS(100));
   iniciarServicioBlue();
-  delay(100);
 }

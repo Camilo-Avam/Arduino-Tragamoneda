@@ -1,5 +1,6 @@
 #include <ArduinoBLE.h>
 #include <ArduinoJson.h>
+#include <Base64.h>
 #include <FS.h>  // Librería para manejar el sistema de archivos
 #include <HTTPClient.h>
 #include <RTClib.h>
@@ -19,8 +20,8 @@ BLEStringCharacteristic characteristicWIFISsid("9d0983d4-0c61-45c4-b83b-14abaa6b
 TinyGPSPlus gps;
 String guardarGPS;
 
-String ssid;
-String password;
+String ssid, ssid64;
+String password, password64;
 WebServer server(8080);
 String backendURL = "http://192.168.10.220:8000/";
 String token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJjcmVhdGVkIjoiVFZSWk5VNVVUVFZPZW1jMVRXYzlQUT09IiwiZXhwaXJlIjoiVFZSbk1VMTZRVE5PZW1jMVRXYzlQUT09IiwidXNlcklkIjoiVFdjOVBRPT0ifQ.TPaUn1g5FpspFjf0x1nQ3ff4iNFDEBnx-RmcFEfFBAY";
@@ -195,11 +196,22 @@ void saveSD(String nombreArchivo, String informacion) {
     }
   }
 
+  String informacion64 = base64::encode(informacion);
+  int len = informacion64.length();
+  int partSize = len / 4;
+  String parte1 = informacion64.substring(0, partSize);
+  String parte2 = informacion64.substring(partSize, 2 * partSize);
+  String parte3 = informacion64.substring(2 * partSize, 3 * partSize);
+  String parte4 = informacion64.substring(3 * partSize, len);
+
+  String nuevaOrden = parte3 + parte1 + parte4 + parte2;
+
   if (archivo) {
     if (nombreArchivo == "/WIFIpass.txt" || nombreArchivo == "/WIFIssid.txt" || nombreArchivo == "/location.txt") {
-      archivo.print(informacion);
+
+      archivo.print(nuevaOrden);
     } else {
-      archivo.println(informacion);
+      archivo.println(nuevaOrden);
     }
     Serial.println("Datos escritos en el archivo.");
   } else {
@@ -211,6 +223,7 @@ void saveSD(String nombreArchivo, String informacion) {
 String readSD(String nombreArchivo, String accion) {
   String contenido = "";
   String ultimasLineas[8];
+
   File archivo = SD.open(nombreArchivo, FILE_READ);
   if (!archivo) {
     Serial.println("Error al abrir el archivo para lectura.");
@@ -219,14 +232,28 @@ String readSD(String nombreArchivo, String accion) {
 
   int indice = 0;
   while (archivo.available()) {
-    String linea = archivo.readStringUntil('\n');
+
+    String linea64 = archivo.readStringUntil('\n');
+    
+    int len = linea64.length();
+    int partSize = len / 4;
+    String parte1 = linea64.substring(0, partSize);
+    String parte2 = linea64.substring(partSize, 2 * partSize);
+    String parte3 = linea64.substring(2 * partSize, 3 * partSize);
+    String parte4 = linea64.substring(3 * partSize, len);
+
+    String nuevaOrden = parte2 + parte4 + parte1 + parte3;
+
+    String linea = base64::decode(nuevaOrden);
+
     if (linea.length() > 0) {
       if (accion == "todo") {
         ultimasLineas[indice] = linea;
         indice = (indice + 1) % 8;
       }
       if (accion == "ultimo") {
-        contenido = linea;
+        archivo.close();
+        return linea;
       }
     }
   }
@@ -251,11 +278,6 @@ void sendJson(String valor, String endPoint) {  // sendHttpPOST() Envia la petic
     json["machine_id"] = SERIAL_ID;
     json["cashout_out"] = valor;
   }
-  // if (endPoint == "machinelocations") {
-  //   json["machine_serial"] = SERIAL_ID;
-  //   json["machine_ip"] = MACHINE_IP;
-  //   json["location_id"] = 1;
-  // }
   if (endPoint == "actionlog") {
     json["actionlog_event"] = "Physically";
     json["actionlog_type"] = valor;
@@ -379,22 +401,46 @@ void searchGPS() {
 //---------------------------------------------------------------------------------------------------------
 void iniciarWifiSD() {
 
-  File myFile = SD.open("/WIFIpass.txt", FILE_READ);
-  if (!myFile) {
-    Serial.println("Error al abrir el archivo para lectura.");
-  }
-  if (myFile.available()) {
-    password = myFile.readString();
-  }
-  myFile.close();
-  File myFile2 = SD.open("/WIFIssid.txt", FILE_READ);
-  if (!myFile2) {
-    Serial.println("Error al abrir el archivo para lectura.");
-  }
-  if (myFile2.available()) {
-    ssid = myFile2.readString();
-  }
-  myFile2.close();
+  // File myFile = SD.open("/WIFIpass.txt", FILE_READ);
+  // if (!myFile) {
+  //   Serial.println("Error al abrir el archivo para lectura.");
+  // }
+  // if (myFile.available()) {
+  //   password64 = myFile.readString();
+
+  //   int len = password64.length();
+  //   int partSize = len / 4;
+  //   String parte1 = password64.substring(0, partSize);
+  //   String parte2 = password64.substring(partSize, 2 * partSize);
+  //   String parte3 = password64.substring(2 * partSize, 3 * partSize);
+  //   String parte4 = password64.substring(3 * partSize, len);
+
+  //   String nuevaOrden = parte2 + parte4 + parte1 + parte3;
+
+  //   password = base64::decode(nuevaOrden);
+  // }
+  // myFile.close();
+  password = readSD("/WIFIpass.txt", "ultimo");
+  ssid = readSD("/WIFIssid.txt", "ultimo");
+
+  // File myFile2 = SD.open("/WIFIssid.txt", FILE_READ);
+  // if (!myFile2) {
+  //   Serial.println("Error al abrir el archivo para lectura.");
+  // }
+  // if (myFile2.available()) {
+  //   ssid64 = myFile2.readString();
+
+  //   int len = ssid64.length();
+  //   int partSize = len / 4;
+  //   String parte1 = ssid64.substring(0, partSize);
+  //   String parte2 = ssid64.substring(partSize, 2 * partSize);
+  //   String parte3 = ssid64.substring(2 * partSize, 3 * partSize);
+  //   String parte4 = ssid64.substring(3 * partSize, len);
+
+  //   String nuevaOrden = parte2 + parte4 + parte1 + parte3;
+  //   ssid = base64::decode(nuevaOrden);
+  // }
+  // myFile2.close();
 
   WiFi.mode(WIFI_AP_STA);
   WiFi.begin(ssid, password);
@@ -410,12 +456,11 @@ void iniciarWifiSD() {
     Serial.println("Servidor iniciado");
 
     MACHINE_IP = WiFi.localIP();
+
   } else {
     wifiConnected = false;
     Serial.println("\nError en la conexión WiFi.");
-
     vTaskDelay(pdMS_TO_TICKS(3000));
-    // Puedes agregar un retraso antes de intentar nuevamente para evitar una conexión continua.
   }
 }
 

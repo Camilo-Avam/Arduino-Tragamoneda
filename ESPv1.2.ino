@@ -459,7 +459,7 @@ void iniciarServicioBlue() {
             Serial.print(F("......."));
             vTaskDelay(pdMS_TO_TICKS(100));
           }
-          vTaskDelay(pdMS_TO_TICKS(2000));
+          vTaskDelay(pdMS_TO_TICKS(4000));
 
           if (registroCashOut) {
             characteristicBLE.writeValue(enviarBluettooth);

@@ -36,7 +36,6 @@ char* passMQTT = "d4t@247#!$";
 int port = 1883;
 const char* mqtt_topic_entrada = "Entrada";
 const char* mqtt_topic_ping = "ping";
-const char* mqtt_topic_salida = "Salida";
 
 //---------------------------------------------------------------------------------------------------------
 // Variables conexion BLE
@@ -65,12 +64,6 @@ const int gmtOffset_sec = -14400;
 struct tm initialTime;
 
 RTC_DS3231 rtc;
-
-//---------------------------------------------------------------------------------------------------------
-struct HttpRequestData {  // pude eliminarse
-  String endPoint;
-  String json;
-};
 
 //---------------------------------------------------------------------------------------------------------
 // Variables lectura maquina, definicion de pines de entrada
@@ -267,7 +260,7 @@ void saveSD(String nombreArchivo, String informacion) {
   String nuevaOrden = parte3 + parte1 + parte4 + parte2;
 
   if (archivo) {
-    if (nombreArchivo == "/WIFIpass.txt" || nombreArchivo == "/WIFIssid.txt" || nombreArchivo == "/location.txt") {
+    if (nombreArchivo == "/WIFIpass.txt" || nombreArchivo == "/WIFIssid.txt" || nombreArchivo == "/location.txt" || nombreArchivo == "/centaderia.txt") {
       archivo.print(nuevaOrden);
     } else {
       archivo.println(nuevaOrden);
@@ -364,7 +357,6 @@ void leerBuzzer() {
   if (buzzerActivo == HIGH && estadoAnteriorBuzzer == LOW) {
     digitalWrite(pinbuzzer, HIGH);
     delay(100);
-    Serial.println(F("Se abrio la puerta"));
     sendJson("Open Door", "actionlog");
     String informacion = "{\"Oppen door\": \"" + actualizaFechaHora() + "\"}";
     saveSD("/openDoor.txt", informacion);
@@ -385,14 +377,15 @@ void sendJson(String valor, String endPoint) {
 
   if (endPoint == "cashin") {
     json["cashin_in"] = valor;
-    json["action"]= "cashin";
+    json["action"] = "cashin";
   }
   if (endPoint == "cashout") {
     json["cashout_out"] = valor;
   }
   if (endPoint == "actionlog") {
-    json["actionlog_event"] = "Physically";
-    json["actionlog_type"] = valor;
+    json["actionlog_type"] = "Physically";
+    json["actionlog_event"] = valor;
+    json["action"] = "event";
   }
   if (endPoint == "collect/received/") {
     json["action"] = valor;
@@ -401,7 +394,7 @@ void sendJson(String valor, String endPoint) {
   String jsonString;
   serializeJson(json, jsonString);
 
-  if (endPoint == "cashin") {
+  if (endPoint == "cashin" || endPoint == "actionlog" ) {
     const char* message = jsonString.c_str();
     mqttClient.publish(mqtt_topic_entrada, message);
   } else {
@@ -419,23 +412,20 @@ void sendHTTP(String endPoint, String json) {
     http.begin(backendURL + endPoint);
   }
   http.addHeader("Authorization", token);
-  if (endPoint == "cashin") {
-    http.setTimeout(500);
-  } else {
-    http.setTimeout(5000);
-  }
+
+  http.setTimeout(5000);
 
   int httpCode = http.POST(json);
   Serial.println(json);
 
   if (httpCode == HTTP_CODE_CREATED) {
-    Serial.print(F("Respuesta del servidor 201:     :"));
+    Serial.print(F("Respuesta 201:     :"));
     Serial.println(http.getString());
   } else if (httpCode == HTTP_CODE_OK) {
-    Serial.print(F("Respuesta del servidor 200:    :"));
+    Serial.print(F("Respuesta 200:    :"));
     Serial.println(http.getString());
   } else {
-    Serial.print(F("Respuesta del servidor: Error"));
+    Serial.print(F("Respuesta Error"));
     Serial.println(http.getString());
     Serial.println(http.errorToString(httpCode));
   }
@@ -498,6 +488,8 @@ void iniciarServicioBlue() {
           String informacion = "{\"reset\": \"" + actualizaFechaHora() + "\"},";
           saveSD("/reset.txt", informacion);
           Serial.println("Reinicio");
+          String message ="{ \"machine_id\": \"" + SERIAL_ID + "\", \"action\" : \"reset\", \"actionlog_event\" : \"Reset\", \"actionlog_type\" : \"bluetooth\" }";
+          mqttClient.publish(mqtt_topic_entrada, message.c_str());
           delay(4000);
           esp_restart();
         }
@@ -527,7 +519,7 @@ void iniciarServicioBlue() {
 
           while (!registroCashOut && registroBluetooth) {
             Serial.print(F("......."));
-            vTaskDelay(pdMS_TO_TICKS(100));
+            vTaskDelay(pdMS_TO_TICKS(300));
           }
           vTaskDelay(pdMS_TO_TICKS(4000));
 
@@ -598,8 +590,7 @@ void reconnect() {
 
     if (mqttClient.connect(mqtt_clientID, userMQTT, passMQTT, mqtt_topic_ping, 0, false, message, false)) {
       mqttClient.subscribe(mqtt_topic_entrada, 0);
-      mqttClient.subscribe(mqtt_topic_ping, 0);
-      mqttClient.subscribe(mqtt_topic_salida, 0);
+      // mqttClient.subscribe(mqtt_topic_ping, 0);
 
       Serial.println("Conectado a servidor MQTT");
 
@@ -687,21 +678,14 @@ void callbackMQTT(char* topic, byte* payload, unsigned int length) {
 void mainSecond(void* parameter) {  // Hilo 1
   while (true) {
     vTaskDelay(pdMS_TO_TICKS(1));
-    if (!wifiConnected) {
-      detectaSerialINGRESO();
-      leerBuzzer();
-    }
+    detectaSerialINGRESO();
+    leerBuzzer();
 
-    if (wifiConnected) {
-      detectaSerialINGRESO();
-      leerBuzzer();
-
-      if (WiFi.status() == !WL_CONNECTED) {
-        wifiConnected = false;
-        synchronization = false;
-        Serial.println(F("No hay conexion con red"));
-        vTaskDelay(pdMS_TO_TICKS(1));
-      }
+    if (wifiConnected && WiFi.status() == !WL_CONNECTED) {
+      wifiConnected = false;
+      synchronization = false;
+      Serial.println(F("No hay conexion con red"));
+      vTaskDelay(pdMS_TO_TICKS(1));
     }
   }
 }
@@ -733,8 +717,6 @@ void mqtt_http(void* parameter) {  // Hilo2
       estadoActual = false;
     }
     estadoPrevio = estadoActual;
-
-
 
     if (wifiConnected && !toggleBleOut) {
 
@@ -783,11 +765,10 @@ void enviarPingHTTP() {
   int httpCode = httpPING.POST(jsonString);
   Serial.print(F("Se envio:  :"));
   Serial.println(jsonString);
-  Serial.print(F("Codigo respuesta: "));
   Serial.println(httpCode);
 
   if (httpCode == HTTP_CODE_OK) {
-    Serial.print(F("Respuesta del servidor: "));
+    Serial.print(F("Respuesta 200: "));
     Serial.println(httpPING.getString());
     conecto = true;
     digitalWrite(ledConexion, HIGH);
@@ -803,7 +784,9 @@ void enviarPingHTTP() {
     Serial.println(httpPING.getString());
     digitalWrite(ledConexion, LOW);
     digitalWrite(ledConectando, HIGH);
+    conecto = false;
   }
+  vTaskDelay(pdMS_TO_TICKS(100));
 
   httpPING.begin(backendURL + "machinelocations/ping");
   httpPING.addHeader("Authorization", token);
@@ -813,8 +796,26 @@ void enviarPingHTTP() {
   String jsonString2;
   serializeJson(json2, jsonString2);
   httpPING.POST(jsonString2);
-  Serial.print(F("Respuesta del servidor: "));
-  Serial.println(httpPING.getString());
+
+  if (httpCode == HTTP_CODE_OK) {
+    Serial.print(F("Respuesta 200: "));
+    Serial.println(httpPING.getString());
+    conecto = true;
+    digitalWrite(ledConexion, HIGH);
+    digitalWrite(ledConectando, LOW);
+  } else if (httpCode == HTTP_CODE_CREATED) {
+    Serial.print(F("Respuesta del servidor 201: "));
+    Serial.println(httpPING.getString());
+    conecto = true;
+    digitalWrite(ledConexion, HIGH);
+    digitalWrite(ledConectando, LOW);
+  } else {
+    Serial.print(F("Error en la solicitud HTTP, se obtuvo http.error:     :"));
+    Serial.println(httpPING.getString());
+    digitalWrite(ledConexion, LOW);
+    digitalWrite(ledConectando, HIGH);
+    conecto = false;
+  }
   httpPING.end();
 }
 
@@ -888,8 +889,7 @@ void syncData() {
 void setup() {
 
   delay(5000);
-  Serial.begin(9600);  // Enviar mensajes
-  Serial2.begin(9600);
+  Serial.begin(9600);
 
   pinMode(pinEntradaCoin, INPUT);
   pinMode(pinEntradaKeyOut, INPUT);
@@ -905,8 +905,13 @@ void setup() {
   delay(200);
   if (!SD.begin(5)) {
     while (1) {
-      delay(1000);
+      digitalWrite(ledConexion, HIGH);
+      digitalWrite(ledConectando, HIGH);
+      delay(500);
       Serial.println("Error al inicializar la tarjeta microSD.");
+      digitalWrite(ledConexion, LOW);
+      digitalWrite(ledConectando, LOW);
+      delay(500);
     }
   }
   Serial.println("Tarjeta microSD inicializada correctamente.");
@@ -915,7 +920,12 @@ void setup() {
   // Bluetooth
   if (!BLE.begin()) {
     while (1) {
-      delay(1000);
+      digitalWrite(ledConexion, HIGH);
+      digitalWrite(ledConectando, LOW);
+      delay(500);
+      digitalWrite(ledConexion, LOW);
+      digitalWrite(ledConectando, HIGH);
+      delay(500);
       Serial.println("Error al iniciar el servicio Bluetooth");
     }
   }
@@ -953,6 +963,11 @@ void setup() {
 
   if (!rtc.begin()) {
     while (1) {
+      digitalWrite(ledConexion, LOW);
+      digitalWrite(ledConectando, HIGH);
+      delay(500);
+      digitalWrite(ledConexion, HIGH);
+      digitalWrite(ledConectando, LOW);
       delay(1000);
       Serial.println(F("No se encuentra el RTC"));
     }

@@ -111,7 +111,6 @@ int centavos = 4;
 unsigned long tiempoAnteriorWifi;    // Variable para almacenar el tiempo anterior
 unsigned int intervaloWifi = 20000;  // Intervalo de 20 segundos
 unsigned long currentMillisWifi;
-bool ejecutarWifi = false;
 
 //=========================================================================================================
 // Inicio funciones nucleo primario
@@ -300,36 +299,16 @@ String readSD(String nombreArchivo, String accion) {
       archivo.close();
       return linea;
     }
+    return "";
   }
-  // if (accion == "sync") {
-  //   while (archivo.available()) {
-  //     String linea64 = archivo.readStringUntil('\n');
-
-  //     int len = linea64.length();
-  //     int partSize = len / 4;
-  //     String parte1 = linea64.substring(0, partSize);
-  //     String parte2 = linea64.substring(partSize, 2 * partSize);
-  //     String parte3 = linea64.substring(2 * partSize, 3 * partSize);
-  //     String parte4 = linea64.substring(3 * partSize, len);
-
-  //     String nuevaOrden = parte2 + parte4 + parte1 + parte3;
-  //     String linea = base64::decode(nuevaOrden);
-  //     contenido += linea + "\n";
-  //   }
-
-  //   archivo.close();
-  //   return contenido;
-  // }
 
   archivo.seek(0, SeekEnd);
   int fileSize = archivo.position();
-
   int newlineCount = 0;
   int filePosition = fileSize;
 
   while (filePosition > 0 && newlineCount < 10) {
     filePosition--;
-
     archivo.seek(filePosition);
     char currentChar = archivo.read();
 
@@ -349,7 +328,6 @@ String readSD(String nombreArchivo, String accion) {
     String linea64 = archivo.readStringUntil('\n');
 
     int len = linea64.length();
-
     int partSize = len / 4;
     String parte1 = linea64.substring(0, partSize);
     String parte2 = linea64.substring(partSize, 2 * partSize);
@@ -369,6 +347,7 @@ String readSD(String nombreArchivo, String accion) {
     contenido += String(ultimasLineas[i]) + "\n";
   }
   archivo.close();
+  Serial.println("read 5 :  " + contenido);
   return contenido + "]";
 }
 
@@ -731,12 +710,9 @@ void mqtt_http(void* parameter) {  // Hilo2
       conteoCoin = 0;
       conteoKeyOut = 0;
     }
+    
     if (wifiConnected && !toggleBleOut) {
       if (!mqttClient.connected()) {
-
-        Serial.println("Entra en lopo");
-        Serial.println(wifiConnected);
-        Serial.println(toggleBleOut);
 
         conecto = false;
         reconnect();
@@ -752,18 +728,20 @@ void mqtt_http(void* parameter) {  // Hilo2
       }
 
       mqttClient.loop();
-
+      
     } else if (!wifiConnected && !toggleBleOut) {
       tiempoAnteriorWifi = millis();
-      if (tiempoAnteriorWifi - currentMillisWifi >= intervalCoin) {
-        if (millis() - tiempoAnteriorWifi >= intervaloWifi) {
-          currentMillisWifi = tiempoAnteriorWifi;
-          ejecutarWifi = true;
-        }
-        if (ejecutarWifi) {
-          iniciarWifiSD();
-          ejecutarWifi = false;
-        }
+      if (tiempoAnteriorWifi - currentMillisWifi >= intervaloWifi) {
+        currentMillisWifi = tiempoAnteriorWifi;
+        iniciarWifiSD();
+        // if (millis() - tiempoAnteriorWifi >= intervaloWifi) {
+        //   currentMillisWifi = tiempoAnteriorWifi;
+        //   ejecutarWifi = true;
+        // }
+        // if (ejecutarWifi) {
+        //   iniciarWifiSD();
+        //   ejecutarWifi = false;
+        // }
       }
     }
   }
@@ -886,6 +864,7 @@ void syncData() {
   }
 
   if (SD.exists("/cashOutSyn.txt") || SD.exists("/cashInSyn.txt")) {
+    combinedJson["serial_id"] = SERIAL_ID;
     String jsonToSend;
     serializeJson(combinedJson, jsonToSend);
 

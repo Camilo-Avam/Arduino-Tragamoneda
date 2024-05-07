@@ -347,7 +347,6 @@ String readSD(String nombreArchivo, String accion) {
     contenido += String(ultimasLineas[i]) + "\n";
   }
   archivo.close();
-  Serial.println("read 5 :  " + contenido);
   return contenido + "]";
 }
 
@@ -490,7 +489,7 @@ void iniciarServicioBlue() {
           Serial.println("Reinicio");
           String message = "{ \"machine_id\": \"" + SERIAL_ID + "\", \"action\" : \"reset\", \"actionlog_event\" : \"Reset\", \"actionlog_type\" : \"bluetooth\" }";
           mqttClient.publish(mqtt_topic_entrada, message.c_str());
-          delay(4000);
+          delay(2000);
           esp_restart();
         }
 
@@ -503,7 +502,6 @@ void iniciarServicioBlue() {
       if (characteristicCashOut.written()) {
         if (characteristicCashOut.value() == "retirarCashOUT") {
           toggleBleOut = true;
-          Serial.println("Ingreso en retirar");
 
           registroBluetooth = false;
           registroCashOut = false;
@@ -524,8 +522,6 @@ void iniciarServicioBlue() {
 
           if (registroCashOut) {
             characteristicCashOut.writeValue(enviarBluettooth);
-            Serial.println("Retiro:   -------------------------");
-            Serial.println(enviarBluettooth);
             enviarBluettooth = "";
           }
           if (!registroBluetooth) {
@@ -564,7 +560,8 @@ void iniciarServicioBlue() {
       if (characteristicGPS.written()) {
         String value = characteristicGPS.value();
         saveSD("/gps.txt", value);
-        characteristicGPS.writeValue("Ubicacion guardada: " + value);
+        characteristicGPS.writeValue("GpsOK");
+        Serial.println("Se guardo el gps");
       }
     }
     Serial.print(F("Disconnected from central: "));
@@ -705,7 +702,7 @@ void mqtt_http(void* parameter) {  // Hilo2
       detectaSerialRETIRO();
     }
     if (conteoError < 1) {
-      vTaskDelay(pdMS_TO_TICKS(1000));
+      vTaskDelay(pdMS_TO_TICKS(2000));
       conteoError = 2;
       conteoCoin = 0;
       conteoKeyOut = 0;
